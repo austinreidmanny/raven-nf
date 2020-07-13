@@ -124,7 +124,7 @@ process combine_fastqs {
     file merged_fastq into merged_fastq
 
     """
-    cat $reads > merged_fastq
+    cat $reads | gzip > merged_fastq.gz
     """
     
 }
