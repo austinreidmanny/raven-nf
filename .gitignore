@@ -1,0 +1,7 @@
+.nextflow*
+.nextflow/**
+resources/cache/**
+.*.log*
+.cache/*
+.idea/**
+.DS_Store
