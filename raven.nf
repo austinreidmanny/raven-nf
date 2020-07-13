@@ -105,12 +105,28 @@ process download_sra_files {
     val sra_id from sra_accessions
 
     output:
-    tuple val(sra_id), file("${sra_id}*fastq") into sra_fastqs
+    file "${sra_id}*fastq" into sra_fastqs
 
     """
     download_sra.sh -s $sra_id -t $params.tempdir -m $task.memory -n $task.cpus -o ./
     """
 
+}
+
+process combine_fastqs {
+    
+    // Combine SRA FASTQs into one file
+
+    input:
+    file reads from sra_fastqs.collect()
+    
+    output:
+    file merged_fastq into merged_fastq
+
+    """
+    cat $reads > merged_fastq
+    """
+    
 }
 
 process de_novo_assembly {
@@ -122,7 +138,7 @@ process de_novo_assembly {
                mode: "copy"
 
     input:
-    file reads from sra_fastqs.collectFile()
+    file reads from merged_fastq
 
     output:
     file "${run_name}.transcripts.fasta"
@@ -131,7 +147,7 @@ process de_novo_assembly {
     """
     # Build contigs with rnaSPAdes & drop any short contigs <300 nt
 
-    rnaspades.py -s $reads -o unfiltered_assemblies/
+    rnaspades.py -s $reads -o unfiltered_assemblies/ --memory $params.memory --threads $params.threads
     seqtk seq -L 300 unfiltered_assemblies/transcripts.fasta" > "${run_name}.transcripts.fasta
     """
 
