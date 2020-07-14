@@ -21,7 +21,7 @@ with open(inf, "r") as input:
 		line_arr = line.split()
 		if len(line_arr) != 3:
 			print("WARNING: Diamond file should have the following format:")
-			print("'{}\t{}\t{}\t{}\t{}\t{}'.format('sequence_name', 'taxonID', 'evalue')")
+			print("'{}\t{}\t{}'.format('sequence_name', 'taxonID', 'evalue')")
 			print("Continuing to next line...")
 		break
 
@@ -65,7 +65,7 @@ with open(inf, "r") as input, \
 
 		# For each sequence, split it into an array and name each item
 		line_arr = line.split()
-		if len(line_arr) != 6:
+		if len(line_arr) != 3:
 			print("Line does not contain all required fields")
 			print("Offending line: %s" % line_arr)
 			continue
