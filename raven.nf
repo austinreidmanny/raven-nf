@@ -378,7 +378,7 @@ process identify_viruses {
     file "${run_name}.viruses.fasta"
 
     """
-    awk '$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
+    awk '\$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
     seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name.viruses.fasta}"
     """
 }
@@ -395,11 +395,11 @@ process print_results {
 
     """
     # Count number of virus contigs
-    echo "Number of viral sequence assemblies in ${run_name}: $(wc -l $viruses_table)"
+    echo "Number of viral sequence assemblies in ${run_name}: \$(wc -l $viruses_table)"
 
     # Print mapped reads per virus family
     echo "Mapped reads per each identified virus family:"
-    awk '{a[$10] += $2} END{for (i in a) print a[i], i}' < $viruses_table
+    awk '{a[\$10] += \$2} END{for (i in a) print a[i], i}' < $viruses_table
 
     # Print the longest virus assembly constructed
     echo "Longest viral sequence assembled:"
