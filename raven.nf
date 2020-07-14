@@ -399,7 +399,7 @@ process print_results {
 
     # Print mapped reads per virus family
     echo "Mapped reads per each identified virus family:"
-    awk '{a[$10] += $2} END{for (i in a) print a[i], i}' < $viruses
+    awk '{a[$10] += $2} END{for (i in a) print a[i], i}' < $viruses_table
 
     # Print the longest virus assembly constructed
     echo "Longest viral sequence assembled:"
