@@ -99,8 +99,6 @@ process parse_sra_ids {
 process download_sra_files {
     // Take in each SRA accession number, download the files, and send them to the mapping process
 
-    //publishDir "${params.output}/01_reads/", mode: "copy"
-
     input:
     val sra_id from sra_accessions
 
@@ -121,10 +119,12 @@ process combine_fastqs {
     file reads from sra_fastqs.collect()
     
     output:
-    file merged_fastq into merged_fastq
-
+    file "merged_reads.fq.gz" into merged_fastq
+    //file "merged_reads.fq" into merged_fastq
+    
     """
-    cat $reads | gzip > merged_fastq.gz
+    #cat $reads | gzip > "merged_reads.fq.gz"
+    cat $reads > "merged_reads.fq.gz"
     """
     
 }
@@ -133,7 +133,7 @@ process de_novo_assembly {
 
     // Assemble reads into fuller-length transcripts
 
-    publishDir path: "${params.outputDirectory}/de_novo_assembly",
+    publishDir path: "${params.output}/01_de_novo_assembly",
                pattern: "${run_name}.transcripts.fasta",
                mode: "copy"
 
@@ -148,7 +148,8 @@ process de_novo_assembly {
     # Build contigs with rnaSPAdes & drop any short contigs <300 nt
 
     rnaspades.py -s $reads -o unfiltered_assemblies/ --memory $params.memory --threads $params.threads
-    seqtk seq -L 300 unfiltered_assemblies/transcripts.fasta" > "${run_name}.transcripts.fasta
+    seqtk seq -L 300 unfiltered_assemblies/transcripts.fasta > "${run_name}.transcripts.fasta"
     """
 
 }
+
