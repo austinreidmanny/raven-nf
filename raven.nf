@@ -111,22 +111,22 @@ process download_sra_files {
 
 }
 
-process combine_fastqs {
-    
+process combine_reads {
+
     // Combine SRA FASTQs into one file
 
     input:
     file reads from sra_fastqs.collect()
-    
+
     output:
-    file "merged_reads.fq.gz" into merged_fastq
+    file "merged_reads.fq.gz" into merged_fastq, merged_fastq_for_taxonomy_analysis
     //file "merged_reads.fq" into merged_fastq
-    
+
     """
     #cat $reads | gzip > "merged_reads.fq.gz"
     cat $reads > "merged_reads.fq.gz"
     """
-    
+
 }
 
 process de_novo_assembly {
@@ -141,15 +141,272 @@ process de_novo_assembly {
     file reads from merged_fastq
 
     output:
-    file "${run_name}.transcripts.fasta"
+    file "${run_name}.transcripts.fasta" into contigs
 
 
     """
     # Build contigs with rnaSPAdes & drop any short contigs <300 nt
 
-    rnaspades.py -s $reads -o unfiltered_assemblies/ --memory $params.memory --threads $params.threads
+    rnaspades.py -s $reads -o unfiltered_assemblies/ --memory $params.memory --threads $task.cpus
     seqtk seq -L 300 unfiltered_assemblies/transcripts.fasta > "${run_name}.transcripts.fasta"
     """
 
 }
 
+process refine_contigs {
+
+    // Map the raw reads to the denovo-assembled-contigs with BWA;
+    // with the reads mapped to their denovo-assemblies, refine the assembly by
+    // finding any mismatches where rnaSPAdes called something different than
+    // what is shown by a pileup of the reads themselves
+
+    // Save the refined TVV contigs
+    publishDir path: "${params.output}/analysis/02_refinement/",
+               pattern: "${run_name}.refined_contigs.fasta.gz",
+               mode: "copy"
+
+   // Save the variants-called bcf file
+   publishDir path: "${params.output}/analysis/02_refinement/",
+              pattern: "${run_name}.variants_called.bcf",
+              mode: "copy"
+
+    // Save the BAM file with the name of the TVV species
+    publishDir path: "${params.output}/analysis/02_refinement/",
+               pattern: "${run_name}.reads_mapped_to_contigs.sorted.bam",
+               mode: "copy"
+
+    // Save the mapping-statistics file with the name of the TVV species
+    publishDir path: "${params.output}/analysis/02_refinement/",
+              pattern: "${run_name}.reads_mapped_to_contigs.sorted.stats",
+              mode: "copy"
+
+    // Only read in the files for TVV species where rnaSPAdes could actually construct contigs
+    input:
+    tuple file(contigs), file(reads) \
+          from contigs.filter { it.get(1).size() > 0 } // make sure contigs file isn't empty
+
+    output:
+    tuple file("${run_name}.refined_contigs.fasta.gz"), \
+          file(reads) \
+          into refined_contigs, contigs_for_identifying_viruses
+
+    """
+    bash refine_contigs.sh  \
+    -s "${run_name}" -r $reads -c $contigs -o "./" -t $task.cpus
+    """
+}
+
+// Map the reads to the contigs to determine per-contig coverage
+process coverage {
+
+    publishDir path: "${params.output}/analysis/03_coverage/",
+               pattern: "${run_name}.contigs_coverage.txt",
+               mode: "copy"
+
+    input:
+    tuple file(refined_contigs), file(reads) from refined_contigs
+
+    output:
+    tuple file(refined_contigs), \
+          file("${run_name}.contigs_coverage.txt") \
+          into contigs_with_coverage
+
+    """
+    # Index contigs for BWA
+    bwa index -p "${run_name}_index" $refined_contigs
+
+    # Map reads to contigs with BWA-mem
+    bwa mem -t $task.cpus "${run_name}_index" $reads | \
+    samtools sort --threads $task.cpus -o "${run_name}.mapped.bam"
+
+    # Calculate the mean-depth (i.e., coverage) per contig; keep each contig's name & coverage; throw away header; sort by coverage
+    samtools coverage "${run_name}.mapped.bam" | \
+    cut -f 1,7 > "${run_name}.contigs_coverage.txt"
+    """
+}
+
+process classify_contigs {
+
+    // Save classifications files
+    publishDir path: "${params.output}/analysis/04_contigs_classification/",
+               pattern: "${run_name}.classification.txt",
+               mode: "copy"
+
+    // Take in refined contigs and reads files only if it's from the unmapped read/contigs
+    input:
+    tuple file(refined_contigs), file(coverage) from contigs_with_coverage
+
+    output:
+    tuple file("${run_name}.contigs_classification.txt"), file(coverage) into classified_contigs
+
+    """
+    # Run diamond
+    diamond \
+    blastx \
+    --verbose \
+    --more-sensitive \
+    --db $params.diamondDB \
+    --query $refined_contigs \
+    --out "${run_name}.contigs_classification.txt" \
+    --outfmt 102 \
+    --max-hsps 1 \
+    --top 1 \
+    --block-size $params.blocksize \
+    --index-chunks 2 \
+    --threads $task.cpus \
+    --tmpdir $params.tempdir
+    """
+}
+
+process taxonomy {
+
+    // Save translated classification files containing the full taxonomic lineages
+    publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
+               pattern: "${run_name}.classification.taxonomy.txt",
+               mode: "copy"
+
+   publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
+              pattern: "${run_name}.final_table.txt",
+              mode: "copy"
+
+    input:
+    tuple file(classifications), file(coverage) from classified_contigs
+
+    output:
+    file "${run_name}.final_table.txt" into table_with_coverage_and_taxonomy
+
+    """
+    # Translate the DIAMOND results to full lineages
+    diamond_to_taxonomy.py $classifications
+
+    # Join the coverage values and the taxonomy results
+    join \
+        -j 1 \
+        -t \$'\t' \
+        --check-order \
+        <(sort -k1,1 $coverage) \
+        <(grep -v "^#" "${run_name}.classification.taxonomy.txt" | sort -k1,1) | \
+    sort -rgk2,2 > \
+    "${run_name}.contigs_coverage_taxonomy.txt"
+
+    # Make a header for a final results table
+    echo -e \
+        "#Contig\t" \
+        "#Coverage\t" \
+        "#TaxonID\t" \
+        "#e-value\t" \
+        "#Domain\t" \
+        "#Kingdom\t" \
+        "#Phylum\t" \
+        "#Class\t" \
+        "#Order\t" \
+        "#Family\t" \
+        "#Genus_species" \
+    > "${run_name}.final_table.txt"
+
+    # Add the data to the final with just the header
+    cat "${run_name}.contigs_coverage_taxonomy.txt" >> \
+        "${run_name}.final_table.txt"
+    """
+
+}
+
+process classify_reads {
+    // Now that the contigs are assembled and classified, I would like to also do a metatranscriptomic
+    // census of just the unassembled reads
+
+    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+               pattern: "${run_name}.taxonomy-of-reads.report.txt",
+               mode: "copy"
+
+    input:
+    file reads from merged_fastq_for_taxonomy_analysis
+
+    output:
+    file "${run_name}.unassembled-reads-taxonomy.kraken.txt" into classified_reads
+
+    """
+    kraken2 \
+    --db $krakenDB \
+    --gzip-compressed --memory-mapping \
+    --threads $task.cpus \
+    --output ${run_name}.taxonomy-of-reads.summary.txt \
+    --report ${run_name}.taxonomy-of-reads.report.txt \
+    $reads
+    """
+
+}
+
+process visualize_reads {
+    // Visualize the classification of the reads from the 'classify_reads' process
+
+    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+               pattern: "${run_name}.reads-taxonomy-visualization.html",
+               mode: "copy"
+
+    input:
+    file classifications from classified_reads
+
+    output:
+    file "${run_name}.reads-taxonomy-visualization.html"
+
+    """
+    ImportTaxonomy.pl \
+    -m 3 -t 5 \
+    $classifications \
+    -o "${run_name}.reads-taxonomy-visualization.html"
+    """
+}
+
+process identify_viruses {
+    // Separate out the viruses and save them to their own folder
+
+    publishDir path: "${params.output}/analysis/07_viruses/",
+               pattern: "${run_name}.viruses.txt",
+               mode: "copy"
+
+    publishDir path: "${params.output}/analysis/07_viruses/",
+               pattern: "${run_name}.viruses.fasta",
+               mode: "copy"
+
+    input:
+    file table from table_with_coverage_and_taxonomy
+    file contigs from contigs_for_identifying_viruses
+
+    output:
+    file "${run_name}.viruses.txt" into viruses_table
+    file "${run_name}.viruses.fasta"
+
+    """
+    awk '$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
+    seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name.viruses.fasta}"
+    """
+}
+
+process print_results {
+    // Create a short summary with the number of virus assemblies, number of unique virus families,
+    // and info on the longest viral contig
+
+    input:
+    file viruses_table
+
+    output:
+    stdout final_results
+
+    """
+    # Count number of virus contigs
+    echo "Number of viral sequence assemblies in ${run_name}: $(wc -l $viruses_table)"
+
+    # Print mapped reads per virus family
+    echo "Mapped reads per each identified virus family:"
+    awk '{a[$10] += $2} END{for (i in a) print a[i], i}' < $viruses
+
+    # Print the longest virus assembly constructed
+    echo "Longest viral sequence assembled:"
+    head -n 1 $viruses_table
+    """
+
+}
+
+final_results.view{ it }
+// ---------------------------------------------------------------------------------------------- //
