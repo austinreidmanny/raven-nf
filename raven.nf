@@ -103,10 +103,25 @@ process download_sra_files {
     val sra_id from sra_accessions
 
     output:
-    file "${sra_id}*fastq" into sra_fastqs
+    file "${sra_id}.fq.gz" into sra_fastqs
 
     """
-    download_sra.sh -s $sra_id -t $params.tempdir -m $task.memory -n $task.cpus -o ./
+    fasterq-dump \
+      -o "${sra_id}.fq" \
+      -O ./ \
+      -b 100MB \
+      -c 500MB \
+      --mem "${task.memory.toGiga()}G" \
+      --temp $params.tempdir \
+      --threads ${task.cpus} \
+      --progress \
+      --split-spot \
+      --skip-technical \
+      --rowid-as-name \
+      $sra_id
+
+    # Compress the output
+    gzip "${sra_id}.fq"
     """
 
 }
@@ -120,11 +135,9 @@ process combine_reads {
 
     output:
     file "merged_reads.fq.gz" into merged_fastq, merged_fastq_for_taxonomy_analysis
-    //file "merged_reads.fq" into merged_fastq
 
     """
-    #cat $reads | gzip > "merged_reads.fq.gz"
-    cat $reads > "merged_reads.fq.gz"
+    cat $reads | gzip > "merged_reads.fq.gz"
     """
 
 }
@@ -145,9 +158,15 @@ process de_novo_assembly {
 
 
     """
-    # Build contigs with rnaSPAdes & drop any short contigs <300 nt
+    # Build contigs with rnaSPAdes [note: need to add feature to switch to metaSPAdes for DNA]
+    rnaspades.py \
+      -s $reads \
+      -o unfiltered_assemblies/ \
+      --memory "${task.memory.toGiga()}" \
+      --threads $task.cpus \
+      --tmp-dir $params.tempdir
 
-    rnaspades.py -s $reads -o unfiltered_assemblies/ --memory $params.memory --threads $task.cpus
+    # Filter out (drop) any short contigs <300 nt
     seqtk seq -L 300 unfiltered_assemblies/transcripts.fasta > "${run_name}.transcripts.fasta"
     """
 
@@ -155,20 +174,24 @@ process de_novo_assembly {
 
 process refine_contigs {
 
-    // Map the raw reads to the denovo-assembled-contigs with BWA;
-    // with the reads mapped to their denovo-assemblies, refine the assembly by
-    // finding any mismatches where rnaSPAdes called something different than
-    // what is shown by a pileup of the reads themselves
+    /* 
+       ------------------------------------------------------------------------
+       Map the raw reads to the denovo-assembled-contigs with BWA;
+       with the reads mapped to their denovo-assemblies, refine the assembly by
+       finding any mismatches where rnaSPAdes called something different than
+       what is shown by a pileup of the reads themselves
+       ------------------------------------------------------------------------
+    */
 
     // Save the refined TVV contigs
     publishDir path: "${params.output}/analysis/02_refinement/",
                pattern: "${run_name}.refined_contigs.fasta.gz",
                mode: "copy"
 
-   // Save the variants-called bcf file
-   publishDir path: "${params.output}/analysis/02_refinement/",
-              pattern: "${run_name}.variants_called.bcf",
-              mode: "copy"
+    // Save the variants-called bcf file
+    publishDir path: "${params.output}/analysis/02_refinement/",
+               pattern: "${run_name}.variants_called.bcf",
+               mode: "copy"
 
     // Save the BAM file with the name of the TVV species
     publishDir path: "${params.output}/analysis/02_refinement/",
@@ -182,13 +205,11 @@ process refine_contigs {
 
     // Only read in the files for TVV species where rnaSPAdes could actually construct contigs
     input:
-    tuple file(contigs), file(reads) \
-          from contigs.filter { it.get(1).size() > 0 } // make sure contigs file isn't empty
+    tuple file(contigs), file(reads) from contigs
 
     output:
-    tuple file("${run_name}.refined_contigs.fasta.gz"), \
-          file(reads) \
-          into refined_contigs, contigs_for_identifying_viruses
+    tuple file("${run_name}.refined_contigs.fasta.gz"), file(reads) \
+    into refined_contigs, contigs_for_identifying_viruses
 
     """
     bash refine_contigs.sh  \
@@ -196,9 +217,10 @@ process refine_contigs {
     """
 }
 
-// Map the reads to the contigs to determine per-contig coverage
 process coverage {
 
+    // Map the reads to the contigs to determine per-contig coverage
+    
     publishDir path: "${params.output}/analysis/03_coverage/",
                pattern: "${run_name}.contigs_coverage.txt",
                mode: "copy"
@@ -227,12 +249,12 @@ process coverage {
 
 process classify_contigs {
 
-    // Save classifications files
+    // Use DIAMOND to taxonomically classify each assembly
+
     publishDir path: "${params.output}/analysis/04_contigs_classification/",
                pattern: "${run_name}.classification.txt",
                mode: "copy"
 
-    // Take in refined contigs and reads files only if it's from the unmapped read/contigs
     input:
     tuple file(refined_contigs), file(coverage) from contigs_with_coverage
 
@@ -256,16 +278,18 @@ process classify_contigs {
     --threads $task.cpus \
     --tmpdir $params.tempdir
     """
+
 }
 
 process taxonomy {
 
     // Save translated classification files containing the full taxonomic lineages
+ 
     publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
                pattern: "${run_name}.classification.taxonomy.txt",
                mode: "copy"
-
-   publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
+    
+    publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
               pattern: "${run_name}.final_table.txt",
               mode: "copy"
 
@@ -312,8 +336,13 @@ process taxonomy {
 }
 
 process classify_reads {
+ 
     // Now that the contigs are assembled and classified, I would like to also do a metatranscriptomic
     // census of just the unassembled reads
+
+    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+               pattern: "${run_name}.taxonomy-of-reads.output.txt",
+               mode: "copy"
 
     publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.report.txt",
@@ -323,21 +352,22 @@ process classify_reads {
     file reads from merged_fastq_for_taxonomy_analysis
 
     output:
-    file "${run_name}.unassembled-reads-taxonomy.kraken.txt" into classified_reads
+    file "${run_name}.taxonomy-of-reads.output.txt" into classified_reads
 
     """
     kraken2 \
-    --db $krakenDB \
+    --db $params.krakenDB \
     --gzip-compressed --memory-mapping \
     --threads $task.cpus \
-    --output ${run_name}.taxonomy-of-reads.summary.txt \
-    --report ${run_name}.taxonomy-of-reads.report.txt \
+    --output "${run_name}.taxonomy-of-reads.output.txt" \
+    --report "${run_name}.taxonomy-of-reads.report.txt" \
     $reads
     """
 
 }
 
 process visualize_reads {
+ 
     // Visualize the classification of the reads from the 'classify_reads' process
 
     publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
@@ -352,13 +382,14 @@ process visualize_reads {
 
     """
     ImportTaxonomy.pl \
-    -m 3 -t 5 \
+    -m 2 -t 3 \
     $classifications \
     -o "${run_name}.reads-taxonomy-visualization.html"
     """
 }
 
 process identify_viruses {
+ 
     // Separate out the viruses and save them to their own folder
 
     publishDir path: "${params.output}/analysis/07_viruses/",
@@ -384,6 +415,7 @@ process identify_viruses {
 }
 
 process print_results {
+ 
     // Create a short summary with the number of virus assemblies, number of unique virus families,
     // and info on the longest viral contig
 
@@ -409,4 +441,6 @@ process print_results {
 }
 
 final_results.view{ it }
+
 // ---------------------------------------------------------------------------------------------- //
+
