@@ -352,7 +352,7 @@ process classify_reads {
     file reads from merged_fastq_for_taxonomy_analysis
 
     output:
-    file "${run_name}.taxonomy-of-reads.output.txt" into classified_reads
+    file "${run_name}.taxonomy-of-reads.report.txt" into classified_reads
 
     """
     kraken2 \
@@ -371,21 +371,21 @@ process visualize_reads {
     // Visualize the classification of the reads from the 'classify_reads' process
 
     publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
-               pattern: "${run_name}.reads-taxonomy-visualization.html",
                mode: "copy"
 
     input:
     file classifications from classified_reads
 
     output:
-    file "${run_name}.reads-taxonomy-visualization.html"
+    file "${run_name}.taxonomy-of-reads.visualization.html"
 
     """
     ImportTaxonomy.pl \
-    -m 2 -t 3 \
+    -m 3 -t 5 \
     $classifications \
-    -o "${run_name}.reads-taxonomy-visualization.html"
+    -o "${run_name}.taxonomy-of-reads.visualization.html"
     """
+
 }
 
 process identify_viruses {
@@ -412,6 +412,7 @@ process identify_viruses {
     awk '\$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
     seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name.viruses.fasta}"
     """
+
 }
 
 process print_results {
