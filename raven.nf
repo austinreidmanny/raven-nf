@@ -137,7 +137,7 @@ process combine_reads {
     file "merged_reads.fq.gz" into merged_fastq, merged_fastq_for_taxonomy_analysis
 
     """
-    cat $reads | gzip > "merged_reads.fq.gz"
+    zcat $reads | gzip > "merged_reads.fq.gz"
     """
 
 }
@@ -154,7 +154,7 @@ process de_novo_assembly {
     file reads from merged_fastq
 
     output:
-    file "${run_name}.transcripts.fasta" into contigs
+    tuple file("${run_name}.transcripts.fasta"), file(reads) into contigs_and_reads
 
 
     """
@@ -184,32 +184,32 @@ process refine_contigs {
     */
 
     // Save the refined TVV contigs
-    publishDir path: "${params.output}/analysis/02_refinement/",
+    publishDir path: "${params.output}/02_refinement/",
                pattern: "${run_name}.refined_contigs.fasta.gz",
                mode: "copy"
 
     // Save the variants-called bcf file
-    publishDir path: "${params.output}/analysis/02_refinement/",
+    publishDir path: "${params.output}/02_refinement/",
                pattern: "${run_name}.variants_called.bcf",
                mode: "copy"
 
     // Save the BAM file with the name of the TVV species
-    publishDir path: "${params.output}/analysis/02_refinement/",
+    publishDir path: "${params.output}/02_refinement/",
                pattern: "${run_name}.reads_mapped_to_contigs.sorted.bam",
                mode: "copy"
 
     // Save the mapping-statistics file with the name of the TVV species
-    publishDir path: "${params.output}/analysis/02_refinement/",
+    publishDir path: "${params.output}/02_refinement/",
               pattern: "${run_name}.reads_mapped_to_contigs.sorted.stats",
               mode: "copy"
 
     // Only read in the files for TVV species where rnaSPAdes could actually construct contigs
     input:
-    tuple file(contigs), file(reads) from contigs
+    tuple file(contigs), file(reads) from contigs_and_reads
 
     output:
-    tuple file("${run_name}.refined_contigs.fasta.gz"), file(reads) \
-    into refined_contigs, contigs_for_identifying_viruses
+    tuple file("${run_name}.refined_contigs.fasta.gz"), file(reads) into \
+          refined_contigs, contigs_for_identifying_viruses
 
     """
     bash refine_contigs.sh  \
@@ -221,7 +221,7 @@ process coverage {
 
     // Map the reads to the contigs to determine per-contig coverage
     
-    publishDir path: "${params.output}/analysis/03_coverage/",
+    publishDir path: "${params.output}/03_coverage/",
                pattern: "${run_name}.contigs_coverage.txt",
                mode: "copy"
 
@@ -251,7 +251,7 @@ process classify_contigs {
 
     // Use DIAMOND to taxonomically classify each assembly
 
-    publishDir path: "${params.output}/analysis/04_contigs_classification/",
+    publishDir path: "${params.output}/04_contigs_classification/",
                pattern: "${run_name}.classification.txt",
                mode: "copy"
 
@@ -285,11 +285,11 @@ process taxonomy {
 
     // Save translated classification files containing the full taxonomic lineages
  
-    publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
+    publishDir path: "${params.output}/05_contigs_taxonomy/",
                pattern: "${run_name}.classification.taxonomy.txt",
                mode: "copy"
     
-    publishDir path: "${params.output}/analysis/05_contigs_taxonomy/",
+    publishDir path: "${params.output}/05_contigs_taxonomy/",
               pattern: "${run_name}.final_table.txt",
               mode: "copy"
 
@@ -340,11 +340,11 @@ process classify_reads {
     // Now that the contigs are assembled and classified, I would like to also do a metatranscriptomic
     // census of just the unassembled reads
 
-    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.output.txt",
                mode: "copy"
 
-    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output/06_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.report.txt",
                mode: "copy"
 
@@ -370,7 +370,7 @@ process visualize_reads {
  
     // Visualize the classification of the reads from the 'classify_reads' process
 
-    publishDir path: "${params.output}/analysis/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
                pattern: "${run_name}.reads-taxonomy-visualization.html",
                mode: "copy"
 
@@ -392,11 +392,11 @@ process identify_viruses {
  
     // Separate out the viruses and save them to their own folder
 
-    publishDir path: "${params.output}/analysis/07_viruses/",
+    publishDir path: "${params.output}/07_viruses/",
                pattern: "${run_name}.viruses.txt",
                mode: "copy"
 
-    publishDir path: "${params.output}/analysis/07_viruses/",
+    publishDir path: "${params.output}/07_viruses/",
                pattern: "${run_name}.viruses.fasta",
                mode: "copy"
 
