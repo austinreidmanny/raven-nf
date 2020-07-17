@@ -174,7 +174,7 @@ process de_novo_assembly {
 
 process refine_contigs {
 
-    /* 
+    /*
        ------------------------------------------------------------------------
        Map the raw reads to the denovo-assembled-contigs with BWA;
        with the reads mapped to their denovo-assemblies, refine the assembly by
@@ -220,7 +220,7 @@ process refine_contigs {
 process coverage {
 
     // Map the reads to the contigs to determine per-contig coverage
-    
+
     publishDir path: "${params.output}/03_coverage/",
                pattern: "${run_name}.contigs_coverage.txt",
                mode: "copy"
@@ -284,11 +284,11 @@ process classify_contigs {
 process taxonomy {
 
     // Save translated classification files containing the full taxonomic lineages
- 
+
     publishDir path: "${params.output}/05_contigs_taxonomy/",
                pattern: "${run_name}.classification.taxonomy.txt",
                mode: "copy"
-    
+
     publishDir path: "${params.output}/05_contigs_taxonomy/",
               pattern: "${run_name}.final_table.txt",
               mode: "copy"
@@ -336,7 +336,7 @@ process taxonomy {
 }
 
 process classify_reads {
- 
+
     // Now that the contigs are assembled and classified, I would like to also do a metatranscriptomic
     // census of just the unassembled reads
 
@@ -344,7 +344,7 @@ process classify_reads {
                pattern: "${run_name}.taxonomy-of-reads.output.txt",
                mode: "copy"
 
-    publishDir path: "${params.output/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.report.txt",
                mode: "copy"
 
@@ -353,6 +353,7 @@ process classify_reads {
 
     output:
     file "${run_name}.taxonomy-of-reads.report.txt" into classified_reads
+    file "${run_name}.taxonomy-of-reads.output.txt"
 
     """
     kraken2 \
@@ -367,7 +368,7 @@ process classify_reads {
 }
 
 process visualize_reads {
- 
+
     // Visualize the classification of the reads from the 'classify_reads' process
 
     publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
@@ -389,7 +390,7 @@ process visualize_reads {
 }
 
 process identify_viruses {
- 
+
     // Separate out the viruses and save them to their own folder
 
     publishDir path: "${params.output}/07_viruses/",
@@ -416,7 +417,7 @@ process identify_viruses {
 }
 
 process print_results {
- 
+
     // Create a short summary with the number of virus assemblies, number of unique virus families,
     // and info on the longest viral contig
 
@@ -444,4 +445,3 @@ process print_results {
 final_results.view{ it }
 
 // ---------------------------------------------------------------------------------------------- //
-
