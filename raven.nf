@@ -411,7 +411,7 @@ process identify_viruses {
 
     """
     awk '\$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
-    seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name.viruses.fasta}"
+    seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name}.viruses.fasta"
     """
 
 }
