@@ -155,7 +155,7 @@ process de_novo_assembly {
 
     output:
     tuple file("${run_name}.transcripts.fasta"), file(reads) into contigs_and_reads
-
+    file "${run_name}.transcripts.fasta" into contigs_for_identifying_viruses
 
     """
     # Build contigs with rnaSPAdes [note: need to add feature to switch to metaSPAdes for DNA]
@@ -184,9 +184,7 @@ process coverage {
     tuple file(contigs), file(reads) from contigs_and_reads
 
     output:
-    tuple file(refined_contigs), \
-          file("${run_name}.contigs_coverage.txt") \
-          into contigs_with_coverage
+    tuple file(contigs), file("${run_name}.contigs_coverage.txt") into contigs_with_coverage
 
     """
     # Index contigs for BWA
@@ -207,7 +205,7 @@ process classify_contigs {
     // Use DIAMOND to taxonomically classify each assembly
 
     publishDir path: "${params.output}/03_contigs_classification/",
-               pattern: "${run_name}.classification.txt",
+               pattern: "${run_name}.contigs_classification.txt",
                mode: "copy"
 
     input:
@@ -264,7 +262,7 @@ process taxonomy {
         -t \$'\t' \
         --check-order \
         <(sort -k1,1 $coverage) \
-        <(grep -v "^#" "${run_name}.classification.taxonomy.txt" | sort -k1,1) | \
+        <(grep -v "^#" "${run_name}.contigs_classification.taxonomy.txt" | sort -k1,1) | \
     sort -rgk2,2 > \
     "${run_name}.contigs_coverage_taxonomy.txt"
 
@@ -354,15 +352,16 @@ process identify_viral_assemblies {
 
     input:
     file table from table_with_coverage_and_taxonomy
-    file viral_contigs from contigs_for_identifying_viruses
+    file contigs from contigs_for_identifying_viruses
 
     output:
     file "${run_name}.viruses.txt" into viruses_table
     file "${run_name}.viruses.fasta" into viral_assemblies
 
     """
-    awk '\$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
-    seqtk subseq <(echo "${run_name}.viruses.txt") $viral_contigs > "${run_name}.viruses.fasta"
+    awk '\$5 == "Viruses" {print}' $table > "${run_name}.viruses.txt"
+    cut -f 1 "${run_name}.viruses.txt" > "${run_name}.viruses.names.txt"
+    seqtk subseq "${run_name}.viruses.names.txt" $contigs > "${run_name}.viruses.fasta"
     """
 
 }
@@ -407,7 +406,8 @@ process refine_viral_assemblies {
 
     """
     bash refine_contigs.sh  \
-    -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus
+    -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus || \
+    echo "ERROR: Exiting. Possible cause: the input viral contigs file is empty"
     """
 }
 
