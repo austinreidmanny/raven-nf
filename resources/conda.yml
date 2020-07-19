@@ -6,6 +6,7 @@ channels:
   - conda-forge
 
 dependencies:
+  - bcftools
   - bwa=0.7.17
   - bzip2=1.0.8
   - ca-certificates=2020.4.5.1
