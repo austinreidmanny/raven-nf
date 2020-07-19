@@ -146,24 +146,35 @@ function refinement () {
     bcftools mpileup \
         --threads $threads \
         -d 1000000 \
+        -Ou \
         -f $contigs \
         $mapped_bam > \
-        "${output_directory}/${sample}.pileup.vcf"
+        "${output_directory}/${sample}.pileup.bcf"
 
     # Call the variants (BCF file)
     bcftools call \
         --threads $threads \
         -m -Ob \
         -o "${output_directory}/${sample}.variants_called.bcf" \
-        "${output_directory}/${sample}.pileup.vcf"
+        "${output_directory}/${sample}.pileup.bcf"
 
     # Index the calls.bcf file
     bcftools index --threads $threads "${output_directory}/${sample}.variants_called.bcf"
 
+    # Normalize indels
+    bcftools norm -f $contigs "${output_directory}/${sample}.variants_called.bcf" \
+        -Ob -o "${output_directory}/${sample}.variants_called.normalized.bcf"
+
+    # Filter out indels within 5 nt
+    bcftools filter \
+        --IndelGap 5 \
+        "${output_directory}/${sample}.variants_called.normalized.bcf" \
+        -Ob -o "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf"
+
     # Combine the reference fasta and the called-variants into a consensus FASTA
     bcftools consensus \
         -f $contigs \
-        "${output_directory}/${sample}.variants_called.bcf" > \
+        "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf"
         "${output_directory}/${sample}.refined_contigs.fasta"
 
     # Compress the consensus fasta and move it to the main folder
