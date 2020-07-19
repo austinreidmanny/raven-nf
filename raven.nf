@@ -134,7 +134,7 @@ process combine_reads {
     file reads from sra_fastqs.collect()
 
     output:
-    file "merged_reads.fq.gz" into merged_fastq, merged_fastq_for_taxonomy_analysis
+    file "merged_reads.fq.gz" into merged_fastq, merged_fastq_for_taxonomy_analysis, reads_for_refinement
 
     """
     zcat $reads | gzip > "merged_reads.fq.gz"
@@ -172,61 +172,16 @@ process de_novo_assembly {
 
 }
 
-process refine_contigs {
-
-    /*
-       ------------------------------------------------------------------------
-       Map the raw reads to the denovo-assembled-contigs with BWA;
-       with the reads mapped to their denovo-assemblies, refine the assembly by
-       finding any mismatches where rnaSPAdes called something different than
-       what is shown by a pileup of the reads themselves
-       ------------------------------------------------------------------------
-    */
-
-    // Save the refined TVV contigs
-    publishDir path: "${params.output}/02_refinement/",
-               pattern: "${run_name}.refined_contigs.fasta.gz",
-               mode: "copy"
-
-    // Save the variants-called bcf file
-    publishDir path: "${params.output}/02_refinement/",
-               pattern: "${run_name}.variants_called.bcf",
-               mode: "copy"
-
-    // Save the BAM file with the name of the TVV species
-    publishDir path: "${params.output}/02_refinement/",
-               pattern: "${run_name}.reads_mapped_to_contigs.sorted.bam",
-               mode: "copy"
-
-    // Save the mapping-statistics file with the name of the TVV species
-    publishDir path: "${params.output}/02_refinement/",
-              pattern: "${run_name}.reads_mapped_to_contigs.sorted.stats",
-              mode: "copy"
-
-    // Only read in the files for TVV species where rnaSPAdes could actually construct contigs
-    input:
-    tuple file(contigs), file(reads) from contigs_and_reads
-
-    output:
-    tuple file("${run_name}.refined_contigs.fasta.gz"), file(reads) into \
-          refined_contigs, contigs_for_identifying_viruses
-
-    """
-    bash refine_contigs.sh  \
-    -s "${run_name}" -r $reads -c $contigs -o "./" -t $task.cpus
-    """
-}
-
 process coverage {
 
     // Map the reads to the contigs to determine per-contig coverage
 
-    publishDir path: "${params.output}/03_coverage/",
+    publishDir path: "${params.output}/02_coverage/",
                pattern: "${run_name}.contigs_coverage.txt",
                mode: "copy"
 
     input:
-    tuple file(refined_contigs), file(reads) from refined_contigs
+    tuple file(contigs), file(reads) from contigs_and_reads
 
     output:
     tuple file(refined_contigs), \
@@ -235,7 +190,7 @@ process coverage {
 
     """
     # Index contigs for BWA
-    bwa index -p "${run_name}_index" $refined_contigs
+    bwa index -p "${run_name}_index" $contigs
 
     # Map reads to contigs with BWA-mem
     bwa mem -t $task.cpus "${run_name}_index" $reads | \
@@ -251,12 +206,12 @@ process classify_contigs {
 
     // Use DIAMOND to taxonomically classify each assembly
 
-    publishDir path: "${params.output}/04_contigs_classification/",
+    publishDir path: "${params.output}/03_contigs_classification/",
                pattern: "${run_name}.classification.txt",
                mode: "copy"
 
     input:
-    tuple file(refined_contigs), file(coverage) from contigs_with_coverage
+    tuple file(contigs), file(coverage) from contigs_with_coverage
 
     output:
     tuple file("${run_name}.contigs_classification.txt"), file(coverage) into classified_contigs
@@ -268,7 +223,7 @@ process classify_contigs {
     --verbose \
     --more-sensitive \
     --db $params.diamondDB \
-    --query $refined_contigs \
+    --query $contigs \
     --out "${run_name}.contigs_classification.txt" \
     --outfmt 102 \
     --max-hsps 1 \
@@ -285,11 +240,11 @@ process taxonomy {
 
     // Save translated classification files containing the full taxonomic lineages
 
-    publishDir path: "${params.output}/05_contigs_taxonomy/",
+    publishDir path: "${params.output}/04_contigs_taxonomy/",
                pattern: "${run_name}.classification.taxonomy.txt",
                mode: "copy"
 
-    publishDir path: "${params.output}/05_contigs_taxonomy/",
+    publishDir path: "${params.output}/04_contigs_taxonomy/",
               pattern: "${run_name}.final_table.txt",
               mode: "copy"
 
@@ -340,11 +295,11 @@ process classify_reads {
     // Now that the contigs are assembled and classified, I would like to also do a metatranscriptomic
     // census of just the unassembled reads
 
-    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/05_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.output.txt",
                mode: "copy"
 
-    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/05_unassembled_reads_taxonomy/",
                pattern: "${run_name}.taxonomy-of-reads.report.txt",
                mode: "copy"
 
@@ -371,7 +326,7 @@ process visualize_reads {
 
     // Visualize the classification of the reads from the 'classify_reads' process
 
-    publishDir path: "${params.output}/06_unassembled_reads_taxonomy/",
+    publishDir path: "${params.output}/05_unassembled_reads_taxonomy/",
                mode: "copy"
 
     input:
@@ -389,31 +344,71 @@ process visualize_reads {
 
 }
 
-process identify_viruses {
+process identify_viral_assemblies {
 
-    // Separate out the viruses and save them to their own folder
+    // Identify the viruses for refinement
 
-    publishDir path: "${params.output}/07_viruses/",
+    publishDir path: "${params.output}/06_viruses/",
                pattern: "${run_name}.viruses.txt",
-               mode: "copy"
-
-    publishDir path: "${params.output}/07_viruses/",
-               pattern: "${run_name}.viruses.fasta",
                mode: "copy"
 
     input:
     file table from table_with_coverage_and_taxonomy
-    file contigs from contigs_for_identifying_viruses
+    file viral_contigs from contigs_for_identifying_viruses
 
     output:
     file "${run_name}.viruses.txt" into viruses_table
-    file "${run_name}.viruses.fasta"
+    file "${run_name}.viruses.fasta" into viral_assemblies
 
     """
     awk '\$5 == "Viruses" {print}' > "${run_name}.viruses.txt"
-    seqtk subseq <(echo "${run_name}.viruses.txt") $contigs > "${run_name}.viruses.fasta"
+    seqtk subseq <(echo "${run_name}.viruses.txt") $viral_contigs > "${run_name}.viruses.fasta"
     """
 
+}
+
+process refine_viral_assemblies {
+
+    /*
+       ------------------------------------------------------------------------
+       Map the raw reads to the denovo-assembled-contigs with BWA;
+       with the reads mapped to their denovo-assemblies, refine the assembly by
+       finding any mismatches where rnaSPAdes called something different than
+       what is shown by a pileup of the reads themselves
+       ------------------------------------------------------------------------
+    */
+
+    // Save the refined TVV contigs
+    publishDir path: "${params.output}/06_viruses",
+               pattern: "${run_name}.refined_contigs.fasta.gz",
+               mode: "copy"
+
+    // Save the variants-called bcf file
+    publishDir path: "${params.output}/06_viruses/mapping_files/",
+               pattern: "${run_name}.variants_called.bcf",
+               mode: "copy"
+
+    // Save the BAM file with the name of the TVV species
+    publishDir path: "${params.output}/06_viruses/mapping_files/",
+               pattern: "${run_name}.reads_mapped_to_contigs.sorted.bam",
+               mode: "copy"
+
+    // Save the mapping-statistics file with the name of the TVV species
+    publishDir path: "${params.output}/06_viruses/mapping_files/",
+              pattern: "${run_name}.reads_mapped_to_contigs.sorted.stats",
+              mode: "copy"
+
+    input:
+    file viral_assemblies
+    file reads from reads_for_refinement
+
+    output:
+    file "${run_name}.refined_contigs.fasta.gz"
+
+    """
+    bash refine_contigs.sh  \
+    -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus
+    """
 }
 
 process print_results {
