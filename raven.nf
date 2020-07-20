@@ -360,8 +360,7 @@ process identify_viral_assemblies {
 
     """
     awk '\$5 == "Viruses" {print}' $table > "${run_name}.viruses.txt"
-    cut -f 1 "${run_name}.viruses.txt" > "${run_name}.viruses.names.txt"
-    seqtk subseq "${run_name}.viruses.names.txt" $contigs > "${run_name}.viruses.fasta"
+    seqtk subseq $contigs <(cut -f 1 "${run_name}.viruses.txt") $contigs > "${run_name}.viruses.fasta"
     """
 
 }
