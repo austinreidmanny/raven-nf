@@ -171,10 +171,13 @@ function refinement () {
         "${output_directory}/${sample}.variants_called.normalized.bcf" \
         -Ob -o "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf"
 
+    # Index the normalized + filtered calls.bcf file
+    bcftools index --threads $threads "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf"
+
     # Combine the reference fasta and the called-variants into a consensus FASTA
     bcftools consensus \
         -f $contigs \
-        "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf"
+        "${output_directory}/${sample}.variants_called.normalized.indels-filtered.bcf" > \
         "${output_directory}/${sample}.refined_contigs.fasta"
 
     # Compress the consensus fasta and move it to the main folder
