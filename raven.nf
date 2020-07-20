@@ -376,9 +376,9 @@ process refine_viral_assemblies {
        ------------------------------------------------------------------------
     */
 
-    // Save the refined TVV contigs
+    // Save the refined viral contigs
     publishDir path: "${params.output}/06_viruses",
-               pattern: "${run_name}.refined_contigs.fasta.gz",
+               pattern: "${run_name}.viruses.fasta.gz",
                mode: "copy"
 
     // Save the variants-called bcf file
@@ -402,11 +402,15 @@ process refine_viral_assemblies {
 
     output:
     file "${run_name}.refined_contigs.fasta.gz"
+    val "true" into pipeline_complete
 
     """
-    bash refine_contigs.sh  \
-    -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus || \
-    echo "ERROR: Exiting. Possible cause: the input viral contigs file is empty"
+    # Run the refinement script
+    bash refine_contigs.sh \
+    -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus
+    
+    # Rename the refined viruses file with a more descriptive name
+    mv "${run_name}.refined_contigs.fasta.gz" "${run_name}.viruses.fasta.gz"
     """
 }
 
@@ -417,6 +421,7 @@ process print_results {
 
     input:
     file viruses_table
+    val pipeline_complete
 
     output:
     stdout final_results
