@@ -401,7 +401,7 @@ process refine_viral_assemblies {
     file reads from reads_for_refinement
 
     output:
-    file "${run_name}.refined_contigs.fasta.gz"
+    file "${run_name}.viruses.fasta.gz"
     val "true" into pipeline_complete
 
     """
@@ -428,15 +428,18 @@ process print_results {
 
     """
     # Count number of virus contigs
-    echo "Number of viral sequence assemblies in ${run_name}: \$(wc -l $viruses_table)"
+    echo ""
+    echo "Number of viral sequence assemblies in ${run_name}: \$(wc -l $viruses_table | cut -d ' ' -f 1)"
 
     # Print mapped reads per virus family
+    echo ""
     echo "Mapped reads per each identified virus family:"
-    awk '{a[\$10] += \$2} END{for (i in a) print a[i], i}' < $viruses_table
+    awk '{a[\$10] += \$2} END{for (i in a) print a[i], i}' < $viruses_table | sort -rnk1,1
 
     # Print the longest virus assembly constructed
+    echo ""
     echo "Longest viral sequence assembled:"
-    head -n 1 $viruses_table
+    head -n 1 $viruses_table | cut -f 1,5,10,11,12
     """
 
 }
