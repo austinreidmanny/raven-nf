@@ -100,28 +100,14 @@ process download_sra_files {
     // Take in each SRA accession number, download the files, and send them to the mapping process
 
     input:
-    val sra_id from sra_accessions
+    tuple sra_id, file(sra_reads) from Channel.fromSRA(sra_accessions, cache: true, apiKey: params.ncbi_apikey
 
     output:
-    file "${sra_id}.fq.gz" into sra_fastqs
+    file "${sra_id}*fastq.gz" into sra_fastqs
 
     """
-    fasterq-dump \
-      -o "${sra_id}.fq" \
-      -O ./ \
-      -b 100MB \
-      -c 500MB \
-      --mem "${task.memory.toGiga()}G" \
-      --temp $params.tempdir \
-      --threads ${task.cpus} \
-      --progress \
-      --split-spot \
-      --skip-technical \
-      --rowid-as-name \
-      $sra_id
-
-    # Compress the output
-    gzip "${sra_id}.fq"
+    echo "Downloading reads for $sra_id ..."
+    wget $sra_reads
     """
 
 }
@@ -408,7 +394,7 @@ process refine_viral_assemblies {
     # Run the refinement script
     bash refine_contigs.sh \
     -s "${run_name}" -r $reads -c $viral_assemblies -o "./" -t $task.cpus
-    
+
     # Rename the refined viruses file with a more descriptive name
     mv "${run_name}.refined_contigs.fasta.gz" "${run_name}.viruses.fasta.gz"
     """
